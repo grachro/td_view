@@ -1,4 +1,4 @@
-from bottle import route, run, static_file, request
+from bottle import route, run, static_file, request, response
 import tdclient
 import myenv
 
@@ -31,6 +31,13 @@ def get_table_schema(db_name, table_name):
     with tdclient.Client(apikey,endpoint=endpoint) as client:
         table = client.table(db_name, table_name)
         return table.schema
+
+def get_table_cols(db_name, table_name):
+    schema = get_table_schema(db_name, table_name)
+    cols = []
+    for col in schema:
+        cols.append(col[0])
+    return cols
 
 def html(body):
     return """
@@ -165,25 +172,30 @@ def show_table(db_name, table_name):
     body += """
 
 
-<h3>copy schema and insert into all</h3>
+<h3>download tsv</h3>
+<form action="/download_tsv/{db_name}">
+order by <input type="text" name="order_by">
+<input type="submit" value="tsv">
+<input type="hidden" name="table_name" value="{base_table_name}">
+</form>
+
+<h3>copy</h3>
 <form action="/copy_schema_and_insert_all/{db_name}">
 new table name <input type="text" name="new_table_name">
-<input type="submit" value="copy schema and insert into all">
+<input type="submit" value="copy schema and data">
 <input type="hidden" name="base_table_name" value="{base_table_name}">
 </form>
 
-<h3>copy schema</h3>
 <form action="/copy_schema/{db_name}">
 new table name <input type="text" name="new_table_name">
-<input type="submit" value="copy schema">
+<input type="submit" value="copy schema only">
 <input type="hidden" name="base_table_name" value="{base_table_name}">
 </form>
 
 
-<h3>insert into all</h3>
 <form action="/insert_all/{db_name}">
 target table name <input type="text" name="target_table_name">
-<input type="submit" value="insert into all">
+<input type="submit" value="copy data only">
 <input type="hidden" name="base_table_name" value="{base_table_name}">
 </form>
 
@@ -227,8 +239,8 @@ insert into table {target_table_name} select {cols} from {base_table_name}
 )
     #copy schema
     with tdclient.Client(apikey,endpoint=endpoint) as client:
-        client.query(db_name, query, type="hive")
-
+        job = client.query(db_name, query, type="hive")
+        job.wait()
 
 @route('/insert_all/<db_name>')
 def insert_all(db_name):
@@ -261,6 +273,40 @@ def copy_schema_and_insert_all(db_name):
 
 
     return show_table(db_name, new_table_name)
+
+
+@route('/download_tsv/<db_name>')
+def download_tsv(db_name):
+    table_name = request.query['table_name']
+    order_by = request.query['order_by']
+    download_file_name = "{table_name}.tsv".format(table_name=table_name)
+
+    cols = get_table_cols(db_name, table_name)
+
+    query = """
+select {cols} from {table_name} order by {order_by}
+""".format(
+  table_name = table_name,
+  order_by = order_by,
+  cols = ",".join(cols),
+)
+
+
+    content = "\t".join(cols) + "\n"
+
+    #copy schema
+    with tdclient.Client(apikey,endpoint=endpoint) as client:
+        job = client.query(db_name, query, type="presto")
+        job.wait()
+        for row in job.result():
+            line = "\t".join(row) + "\n"
+            content += line
+
+
+    response.content_type = 'ext/tsv'
+    response.set_header('Content-Length', str(len(content)))
+    response.set_header('Content-Disposition', 'attachment; filename="%s"' % download_file_name)
+    return content
 
 
 run(host=myenv.host, port=myenv.port, debug=True, reloader=True)
