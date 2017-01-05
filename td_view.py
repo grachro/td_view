@@ -299,7 +299,7 @@ select {cols} from {table_name} order by {order_by}
         job = client.query(db_name, query, type="presto")
         job.wait()
         for row in job.result():
-            line = "\t".join(row) + "\n"
+            line = "\t".join(map(str,row)) + "\n"
             content += line
 
 
