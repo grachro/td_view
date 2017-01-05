@@ -2,6 +2,10 @@
 
 ## install
 
+### pip
+    pip install bottle
+    pip install td-client
+
 ### git clone
     git clone https://github.com/grachro/td_view.git
     cd td_view
