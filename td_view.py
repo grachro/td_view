@@ -134,11 +134,7 @@ def table_list(db_name):
 @route('/table/<db_name>/<table_name>')
 def show_table(db_name, table_name):
     
-    filter = ""
-    try:
-        filter= request.query['filter']    
-    except:
-        pass  
+    filter= request.query.filter or ""   
     filter_html = edit_filter_html(db_name, filter)
     
     body = """
@@ -174,114 +170,124 @@ def show_table(db_name, table_name):
 
 <h3>download tsv</h3>
 <form action="/download_tsv/{db_name}">
-order by <input type="text" name="order_by">
-<input type="submit" value="tsv">
-<input type="hidden" name="table_name" value="{base_table_name}">
+  <div class="form-group">
+    <label>order by</label>
+    <input class="form-control" type="text" name="order_by">
+  </div>
+
+  <div class="form-check">
+    <label class="form-check-label">
+      <input class="form-check-input" type="checkbox" name="with_time" checked="checked">
+      time
+    </label>
+  </div>
+  <button type="submit" class="btn btn-primary">download tsv</button>
+  <input type="hidden" name="table_name" value="{from_table_name}">
 </form>
 
 <h3>copy</h3>
-<form action="/copy_schema_and_insert_all/{db_name}">
-new table name <input type="text" name="new_table_name">
-<input type="submit" value="copy schema and data">
-<input type="hidden" name="base_table_name" value="{base_table_name}">
+
+
+<form action="/copy_table/{db_name}">
+  <div class="form-group">
+    <label>from table</label>
+    <p class="form-control-static">{from_table_name}</p>
+    <input type="hidden" name="from_table_name" value="{from_table_name}">
+  </div>
+  <div class="form-group">
+    <label>to table</label>
+    <input class="form-control" type="text" name="to_table_name">
+  </div>
+  
+  
+  <label class="form-check-inline">
+    <input class="form-check-input" type="radio" name="copy_mode" id="inlineRadio1" value="all" checked> copy schema and data 
+  </label>
+  <label class="form-check-inline">
+    <input class="form-check-input" type="radio" name="copy_mode" id="inlineRadio2" value="schema"> schema only 
+  </label>
+  <label class="form-check-inline">
+    <input class="form-check-input" type="radio" name="copy_mode" id="inlineRadio3" value="data"> data only 
+  </label>  
+  
+  <div class="form-check">
+    <label class="form-check-label">
+      <input class="form-check-input" type="checkbox" name="with_time" checked="checked">
+      time
+    </label>
+  </div>
+  <button type="submit" class="btn btn-primary">copy</button>
 </form>
-
-<form action="/copy_schema/{db_name}">
-new table name <input type="text" name="new_table_name">
-<input type="submit" value="copy schema only">
-<input type="hidden" name="base_table_name" value="{base_table_name}">
-</form>
-
-
-<form action="/insert_all/{db_name}">
-target table name <input type="text" name="target_table_name">
-<input type="submit" value="copy data only">
-<input type="hidden" name="base_table_name" value="{base_table_name}">
-</form>
-
-
 """.format(
     db_name = db_name,
-    base_table_name = table_name,
+    from_table_name = table_name,
     filter_html=filter_html,
 )
  
     return html(body)
 
 
-@route('/copy_schema/<db_name>')
-def copy_schema(db_name):
-    base_table_name = request.query['base_table_name']
-    new_table_name  = request.query['new_table_name']
-
-    #get base tabel schema
-    schema = get_table_schema(db_name, base_table_name)
-
-    #copy schema
+def copy_schema(db_name, from_table_name, to_table_name, schema):
     with tdclient.Client(apikey,endpoint=endpoint) as client:
-        client.create_log_table(db_name, new_table_name)
-        client.update_schema(db_name, new_table_name, schema)
+        client.create_log_table(db_name, to_table_name)
+        client.update_schema(db_name, to_table_name, schema)
 
 
-    return show_table(db_name, new_table_name)
+def copy_data(db_name, from_table_name, to_table_name, cols):
 
-def insert(db_name, base_table_name, target_table_name, schema):
-    cols = []
-    for col in schema:
-        cols.append(col[0])
 
     query = """
-insert into table {target_table_name} select {cols} from {base_table_name}
+insert into table {to_table_name} select {cols} from {from_table_name}
 """.format(
-  target_table_name = target_table_name,
-  base_table_name = base_table_name,
+  to_table_name = to_table_name,
+  from_table_name = from_table_name,
   cols = ",".join(cols),
 )
-    #copy schema
     with tdclient.Client(apikey,endpoint=endpoint) as client:
         job = client.query(db_name, query, type="hive")
         job.wait()
 
-@route('/insert_all/<db_name>')
-def insert_all(db_name):
-    base_table_name = request.query['base_table_name']
-    target_table_name  = request.query['target_table_name']
+
+@route('/copy_table/<db_name>')
+def copy_table(db_name):
+    from_table_name = request.query['from_table_name']
+    to_table_name  = request.query['to_table_name']
+    copy_mode = request.query.copy_mode
+    with_time = request.query.with_time or ""
 
     #get base tabel schema
-    schema = get_table_schema(db_name, base_table_name)
+    schema = get_table_schema(db_name, from_table_name)
 
-    insert(db_name, base_table_name, target_table_name, schema)
-
-    return show_table(db_name, target_table_name)
-
-
-
-@route('/copy_schema_and_insert_all/<db_name>')
-def copy_schema_and_insert_all(db_name):
-    base_table_name = request.query['base_table_name']
-    new_table_name  = request.query['new_table_name']
-
-    #get base tabel schema
-    schema = get_table_schema(db_name, base_table_name)
-
-    #copy schema
-    with tdclient.Client(apikey,endpoint=endpoint) as client:
-        client.create_log_table(db_name, new_table_name)
-        client.update_schema(db_name, new_table_name, schema)
-
-    insert(db_name, base_table_name, new_table_name, schema)
+    cols = []
+    for col in schema:
+        cols.append(col[0])
+    if with_time == "on":
+        cols.append("time")
 
 
-    return show_table(db_name, new_table_name)
+    if copy_mode == "all":
+        copy_schema(db_name, from_table_name, to_table_name, schema)
+        copy_data(db_name, from_table_name, to_table_name, cols)
+    elif copy_mode == "schema":
+        copy_schema(db_name, from_table_name, to_table_name, schema)
+    elif copy_mode == "data":
+        copy_data(db_name, from_table_name, to_table_name, cols)
+
+    return show_table(db_name, to_table_name)
 
 
 @route('/download_tsv/<db_name>')
 def download_tsv(db_name):
     table_name = request.query['table_name']
     order_by = request.query['order_by']
+    
+    with_time = request.query.with_time or ""
+    
     download_file_name = "{table_name}.tsv".format(table_name=table_name)
 
     cols = get_table_cols(db_name, table_name)
+    if with_time == "on":
+        cols.append("time")
 
     query = """
 select {cols} from {table_name} order by {order_by}
