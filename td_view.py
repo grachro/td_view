@@ -63,7 +63,7 @@ def edit_filter_html(db_name, filter):
     body = """
 <div>
 <form method="get" action="/table_list/{db_name}">
-filter <input type="text" name="filter" value="{filter}"></input><input type="submit"></input>
+filter <input type="text" name="filter" value="{filter}"></input><input type="submit" value="find"></input>
 </form>
 </div>
 """.format(db_name = db_name, filter = filter,)
@@ -77,14 +77,15 @@ def send_static(filename):
 @route('/')
 def index():
     body = """
-<h1>db list</h1>
+<h1>td view</h1>
+
+<h2>db list</h2>
 <ul>
 """  
     for db_name in get_db_names():
         body += "<li><a href='/table_list/{db_name}'>{db_name}</a></li>".format(db_name = db_name)
     
     body += "</ul>"
-    
     return html(body)
 
 
@@ -93,15 +94,18 @@ def index():
 @route('/table_list/<db_name>')
 def table_list(db_name):
     
-    filter = ""
-    try:
-        filter= request.query['filter']    
-    except:
-        pass  
+    
+    filter= request.query.filter or ""   
     filter_html = edit_filter_html(db_name, filter)
    
-    
-    tables = get_tables(db_name, filter)
+
+    if filter == "":    
+        tables = {}
+    else:
+        tables = get_tables(db_name, filter)
+
+        
+
     body = """
 <h1>db {db_name}</h1>
 {filter_html}
@@ -127,8 +131,6 @@ def table_list(db_name):
 
     body += "</table>"
     return html(body)
-
-
 
 
 @route('/table/<db_name>/<table_name>')
@@ -186,38 +188,7 @@ def show_table(db_name, table_name):
 </form>
 
 <h3>copy</h3>
-
-
-<form action="/copy_table/{db_name}">
-  <div class="form-group">
-    <label>from table</label>
-    <p class="form-control-static">{from_table_name}</p>
-    <input type="hidden" name="from_table_name" value="{from_table_name}">
-  </div>
-  <div class="form-group">
-    <label>to table</label>
-    <input class="form-control" type="text" name="to_table_name">
-  </div>
-  
-  
-  <label class="form-check-inline">
-    <input class="form-check-input" type="radio" name="copy_mode" id="inlineRadio1" value="all" checked> copy schema and data 
-  </label>
-  <label class="form-check-inline">
-    <input class="form-check-input" type="radio" name="copy_mode" id="inlineRadio2" value="schema"> schema only 
-  </label>
-  <label class="form-check-inline">
-    <input class="form-check-input" type="radio" name="copy_mode" id="inlineRadio3" value="data"> data only 
-  </label>  
-  
-  <div class="form-check">
-    <label class="form-check-label">
-      <input class="form-check-input" type="checkbox" name="with_time" checked="checked">
-      time
-    </label>
-  </div>
-  <button type="submit" class="btn btn-primary">copy</button>
-</form>
+<a href="/copy_form?from_db_name={db_name}&from_table_name={from_table_name}&to_db_name={db_name}">go copy form</a>
 """.format(
     db_name = db_name,
     from_table_name = table_name,
@@ -227,36 +198,39 @@ def show_table(db_name, table_name):
     return html(body)
 
 
-def copy_schema(db_name, from_table_name, to_table_name, schema):
+def copy_schema(to_db_name, to_table_name, schema):
     with tdclient.Client(apikey,endpoint=endpoint) as client:
-        client.create_log_table(db_name, to_table_name)
-        client.update_schema(db_name, to_table_name, schema)
+        client.create_log_table(to_db_name, to_table_name)
+        client.update_schema(to_db_name, to_table_name, schema)
 
 
-def copy_data(db_name, from_table_name, to_table_name, cols):
+def copy_data(from_db_name, from_table_name, to_db_name, to_table_name, cols):
 
 
     query = """
-insert into table {to_table_name} select {cols} from {from_table_name}
+insert into table {to_db_name}.{to_table_name} select {cols} from {from_table_name}
 """.format(
-  to_table_name = to_table_name,
   from_table_name = from_table_name,
+  to_db_name = to_db_name,
+  to_table_name = to_table_name,
   cols = ",".join(cols),
 )
     with tdclient.Client(apikey,endpoint=endpoint) as client:
-        job = client.query(db_name, query, type="hive")
+        job = client.query(from_db_name, query, type="hive")
         job.wait()
 
 
-@route('/copy_table/<db_name>')
-def copy_table(db_name):
+@route('/copy_table')
+def copy_table():
+    from_db_name = request.query['from_db_name']
     from_table_name = request.query['from_table_name']
+    to_db_name  = request.query['to_db_name']
     to_table_name  = request.query['to_table_name']
     copy_mode = request.query.copy_mode
     with_time = request.query.with_time or ""
 
     #get base tabel schema
-    schema = get_table_schema(db_name, from_table_name)
+    schema = get_table_schema(from_db_name, from_table_name)
 
     cols = []
     for col in schema:
@@ -266,14 +240,14 @@ def copy_table(db_name):
 
 
     if copy_mode == "all":
-        copy_schema(db_name, from_table_name, to_table_name, schema)
-        copy_data(db_name, from_table_name, to_table_name, cols)
+        copy_schema(to_db_name, to_table_name, schema)
+        copy_data(from_db_name, from_table_name, to_db_name, to_table_name, cols)
     elif copy_mode == "schema":
-        copy_schema(db_name, from_table_name, to_table_name, schema)
+        copy_schema(to_db_name, to_table_name, schema)
     elif copy_mode == "data":
-        copy_data(db_name, from_table_name, to_table_name, cols)
+        copy_data(from_db_name, from_table_name, to_db_name, to_table_name, cols)
 
-    return show_table(db_name, to_table_name)
+    return show_table(to_db_name, to_table_name)
 
 
 @route('/download_tsv/<db_name>')
@@ -314,6 +288,69 @@ select {cols} from {table_name} order by {order_by}
     response.set_header('Content-Disposition', 'attachment; filename="%s"' % download_file_name)
     return content
 
+
+def edit_copy_form_html(from_db_name,from_table_name,to_db_name,to_table_name):
+    return """
+<form action="/copy_table">
+
+  <div class="form-group">
+    <label>from db</label>
+    <input class="form-control" type="text" name="from_db_name" value="{from_db_name}">
+  </div>
+  <div class="form-group">
+    <label>from table</label>
+    <input class="form-control" type="text" name="from_table_name" value="{from_table_name}">
+  </div>
+
+  <div class="form-group">
+    <label>to db</label>
+    <input class="form-control" type="text" name="to_db_name" value="{to_db_name}">
+  </div>
+  <div class="form-group">
+    <label>to table</label>
+    <input class="form-control" type="text" name="to_table_name" value="{to_table_name}">
+  </div>
+  
+  
+  <label class="form-check-inline">
+    <input class="form-check-input" type="radio" name="copy_mode" id="inlineRadio1" value="all" checked> copy schema and data 
+  </label>
+  <label class="form-check-inline">
+    <input class="form-check-input" type="radio" name="copy_mode" id="inlineRadio2" value="schema"> schema only 
+  </label>
+  <label class="form-check-inline">
+    <input class="form-check-input" type="radio" name="copy_mode" id="inlineRadio3" value="data"> data only 
+  </label>  
+  
+  <div class="form-check">
+    <label class="form-check-label">
+      <input class="form-check-input" type="checkbox" name="with_time" checked="checked">
+      time
+    </label>
+  </div>
+  <button type="submit" class="btn btn-primary">copy</button>
+</form>
+ """.format(
+     from_db_name = from_db_name,
+     from_table_name = from_table_name,
+     to_db_name = to_db_name,
+     to_table_name = to_table_name,
+    )
+    
+
+@route('/copy_form')
+def copy_form():
+    
+    from_db_name    = request.query.from_db_name or ""
+    from_table_name = request.query.from_table_name or ""
+    to_db_name    = request.query.to_db_name or ""
+    to_table_name = request.query.to_table_name or ""
+    
+    
+    body = """<h1>copy</h1>"""
+    body += edit_copy_form_html(from_db_name,from_table_name,to_db_name,to_table_name)
+    
+    return html(body)
 
 run(host=myenv.host, port=myenv.port, debug=True, reloader=True)
 
