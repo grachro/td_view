@@ -109,10 +109,21 @@ def table_list(db_name):
     body = """
 <h1>db {db_name}</h1>
 {filter_html}
+""".format(db_name = db_name, filter_html = filter_html,)
 
+    body += """
+<h3>copy</h3>
+<a href="/copy_form?from_db_name={db_name}&to_db_name={db_name}">go copy form</a>
+""".format(db_name = db_name)
+
+    body += """
+<h3>table list</h3>
 <table class="table table-bordered">
 <tr><th>table name</th><th>record count</th></tr>
-""".format(db_name = db_name, filter_html = filter_html,)
+""".format(db_name = db_name)
+
+
+
 
     for tbl_name,tbl_count in sorted(tables.items()):
         list = """
